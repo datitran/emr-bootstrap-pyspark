@@ -1,0 +1,42 @@
+name: emr-bootstrap-pyspark
+channels:
+- spacy
+- conda-forge
+- defaults
+dependencies:
+- boto3=1.4.0=py35_0
+- conda-forge::botocore=1.4.49=py35_0
+- conda-forge::ca-certificates=2016.8.31=0
+- conda-forge::certifi=2016.8.31=py35_0
+- conda-forge::docutils=0.12=py35_0
+- conda-forge::jmespath=0.9.0=py35_0
+- conda-forge::ncurses=5.9=9
+- conda-forge::openssl=1.0.2h=2
+- conda-forge::pip=8.1.2=py35_0
+- conda-forge::python=3.5.2=2
+- conda-forge::python-dateutil=2.5.3=py35_0
+- conda-forge::pyyaml=3.11=py35_0
+- conda-forge::readline=6.2=0
+- conda-forge::s3transfer=0.1.8=py35_0
+- conda-forge::setuptools=27.1.2=py35_0
+- conda-forge::six=1.10.0=py35_0
+- conda-forge::sqlite=3.13.0=1
+- conda-forge::tk=8.5.19=0
+- conda-forge::wheel=0.29.0=py35_0
+- conda-forge::xz=5.2.2=0
+- conda-forge::yaml=0.1.6=0
+- conda-forge::zlib=1.2.8=3
+- pip:
+  - botocore==1.4.49
+  - certifi==2016.8.31
+  - docutils==0.12
+  - jmespath==0.9.0
+  - pip==8.1.2
+  - python-dateutil==2.5.3
+  - pyyaml==3.11
+  - s3transfer==0.1.8
+  - setuptools==27.1.2.post20161105
+  - six==1.10.0
+  - wheel==0.29.0
+prefix: /Users/datitran/anaconda/envs/emr-bootstrap-pyspark
+

@@ -1,0 +1,8 @@
+emr:
+  aws_access_key: aws-access-key
+  aws_secret_access_key: aws-secret-access-key
+  region_name: region-name
+  cluster_name: cluster-name
+  instance_count: 2
+  key_name: ec2-key-name
+  log_uri: log-uri-s3

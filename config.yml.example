@@ -5,4 +5,6 @@ emr:
   cluster_name: <Cluster Name>
   instance_count: <Number of Instances>
   key_name: <Ec2 Keyname>
-  log_uri: s3://<Your S3 Location>
+  log_uri: s3://<Your S3 Location to the Logs>
+  software_version: <emr-5.x.x>
+  script_uri: s3://Your S3 Location to the Scripts>

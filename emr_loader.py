@@ -1,11 +1,20 @@
 import boto3
 import yaml
 import time
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+logger.addHandler(ch)
 
 
 class EMRLoader(object):
     def __init__(self, aws_access_key, aws_secret_access_key, region_name, cluster_name, instance_count, key_name,
-                 log_uri):
+                 log_uri, software_version, script_uri):
         self.instance_count = instance_count
         self.key_name = key_name
         self.cluster_name = cluster_name
@@ -13,6 +22,8 @@ class EMRLoader(object):
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
         self.log_uri = log_uri
+        self.software_version = software_version
+        self.script_uri = script_uri
 
     def emr_client(self):
         client = boto3.client("emr",
@@ -25,7 +36,7 @@ class EMRLoader(object):
         response = self.emr_client().run_job_flow(
             Name=self.cluster_name,
             LogUri=self.log_uri,
-            ReleaseLabel='emr-5.0.0',
+            ReleaseLabel=self.software_version,
             Instances={
                 'MasterInstanceType': 'm3.xlarge',
                 'SlaveInstanceType': 'm3.xlarge',
@@ -43,7 +54,7 @@ class EMRLoader(object):
                 {
                     'Name': 'Install Conda',
                     'ScriptBootstrapAction': {
-                        'Path': 's3://emr-bootstrap-pyspark/bootstrap_actions.sh',
+                        'Path': '{script_uri}bootstrap_actions.sh'.format(script_uri=self.script_uri),
                     }
                 },
             ],
@@ -51,7 +62,7 @@ class EMRLoader(object):
             JobFlowRole='EMR_EC2_DefaultRole',
             ServiceRole='EMR_DefaultRole'
         )
-        print(response)
+        logger.info(response)
         return response
 
     def add_step(self, job_flow_id, master_dns):
@@ -63,7 +74,8 @@ class EMRLoader(object):
                     'ActionOnFailure': 'CANCEL_AND_WAIT',
                     'HadoopJarStep': {
                         'Jar': 'command-runner.jar',
-                        'Args': ['aws', 's3', 'cp', 's3://emr-bootstrap-pyspark/pyspark_quick_setup.sh',
+                        'Args': ['aws', 's3', 'cp',
+                                 '{script_uri}pyspark_quick_setup.sh'.format(script_uri=self.script_uri),
                                  '/home/hadoop/']
                     }
                 },
@@ -92,7 +104,9 @@ if __name__ == "__main__":
         cluster_name=config_emr.get("cluster_name"),
         instance_count=config_emr.get("instance_count"),
         key_name=config_emr.get("key_name"),
-        log_uri=config_emr.get("log_uri")
+        log_uri=config_emr.get("log_uri"),
+        software_version=config_emr.get("software_version"),
+        script_uri=config_emr.get("script_uri")
     )
 
     emr_response = emr_loader.load_cluster()
@@ -105,8 +119,10 @@ if __name__ == "__main__":
         time.sleep(10)
         if response.get("Cluster").get("MasterPublicDnsName") is not None:
             master_dns = response.get("Cluster").get("MasterPublicDnsName")
+
+        if response.get("Cluster").get("Status").get("State") == "WAITING":
             break
         else:
-            print(response)
+            logger.info(response)
 
     emr_loader.add_step(emr_response.get("JobFlowId"), master_dns)

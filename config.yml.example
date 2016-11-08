@@ -7,4 +7,4 @@ emr:
   key_name: <Ec2 Keyname>
   log_uri: s3://<Your S3 Location to the Logs>
   software_version: <emr-5.x.x>
-  script_uri: s3://Your S3 Location to the Scripts>
+  script_bucket_name: <Name of Bucket to be created on S3>

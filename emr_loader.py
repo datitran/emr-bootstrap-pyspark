@@ -1,4 +1,5 @@
 import boto3
+import botocore
 import yaml
 import time
 import logging
@@ -14,7 +15,7 @@ logger.addHandler(ch)
 
 class EMRLoader(object):
     def __init__(self, aws_access_key, aws_secret_access_key, region_name, cluster_name, instance_count, key_name,
-                 log_uri, software_version, script_uri):
+                 log_uri, software_version, script_bucket_name):
         self.instance_count = instance_count
         self.key_name = key_name
         self.cluster_name = cluster_name
@@ -23,17 +24,17 @@ class EMRLoader(object):
         self.region_name = region_name
         self.log_uri = log_uri
         self.software_version = software_version
-        self.script_uri = script_uri
+        self.script_bucket_name = script_bucket_name
 
-    def emr_client(self):
-        client = boto3.client("emr",
+    def boto_client(self, service):
+        client = boto3.client(service,
                               aws_access_key_id=self.aws_access_key,
                               aws_secret_access_key=self.aws_secret_access_key,
                               region_name=self.region_name)
         return client
 
     def load_cluster(self):
-        response = self.emr_client().run_job_flow(
+        response = self.boto_client("emr").run_job_flow(
             Name=self.cluster_name,
             LogUri=self.log_uri,
             ReleaseLabel=self.software_version,
@@ -54,7 +55,8 @@ class EMRLoader(object):
                 {
                     'Name': 'Install Conda',
                     'ScriptBootstrapAction': {
-                        'Path': '{script_uri}bootstrap_actions.sh'.format(script_uri=self.script_uri),
+                        'Path': 's3://{script_bucket_name}/bootstrap_actions.sh'.format(
+                            script_bucket_name=self.script_bucket_name),
                     }
                 },
             ],
@@ -66,7 +68,7 @@ class EMRLoader(object):
         return response
 
     def add_step(self, job_flow_id, master_dns):
-        response = self.emr_client().add_job_flow_steps(
+        response = self.boto_client("emr").add_job_flow_steps(
             JobFlowId=job_flow_id,
             Steps=[
                 {
@@ -75,7 +77,8 @@ class EMRLoader(object):
                     'HadoopJarStep': {
                         'Jar': 'command-runner.jar',
                         'Args': ['aws', 's3', 'cp',
-                                 '{script_uri}pyspark_quick_setup.sh'.format(script_uri=self.script_uri),
+                                 's3://{script_bucket_name}/pyspark_quick_setup.sh'.format(
+                                     script_bucket_name=self.script_bucket_name),
                                  '/home/hadoop/']
                     }
                 },
@@ -89,10 +92,29 @@ class EMRLoader(object):
                 }
             ]
         )
+        logger.info(response)
         return response
 
+    def create_bucket_on_s3(self, bucket_name):
+        s3 = self.boto_client("s3")
+        try:
+            logger.info("Bucket already exists.")
+            s3.head_bucket(Bucket=bucket_name)
+        except botocore.exceptions.ClientError as e:
+            logger.info("Bucket does not exist: {error}. I will create it!".format(error=e))
+            s3.create_bucket(Bucket=bucket_name)
 
-if __name__ == "__main__":
+    def upload_to_s3(self, file_name, bucket_name, key_name):
+        s3 = self.boto_client("s3")
+        logger.info(
+            "Upload file '{file_name}' to bucket '{bucket_name}'".format(file_name=file_name, bucket_name=bucket_name))
+        s3.upload_file(file_name, bucket_name, key_name)
+
+
+def main():
+    logger.info(
+        "*******************************************+**********************************************************")
+    logger.info("Load config and set up client.")
     with open("config.yml", "r") as file:
         config = yaml.load(file)
     config_emr = config.get("emr")
@@ -106,23 +128,51 @@ if __name__ == "__main__":
         key_name=config_emr.get("key_name"),
         log_uri=config_emr.get("log_uri"),
         software_version=config_emr.get("software_version"),
-        script_uri=config_emr.get("script_uri")
+        script_bucket_name=config_emr.get("script_bucket_name")
     )
 
+    logger.info(
+        "*******************************************+**********************************************************")
+    logger.info("Check if bucket exists otherwise create it and upload files to S3.")
+    emr_loader.create_bucket_on_s3(bucket_name=config_emr.get("script_bucket_name"))
+    emr_loader.upload_to_s3("scripts/bootstrap_actions.sh", bucket_name=config_emr.get("script_bucket_name"),
+                            key_name="bootstrap_actions.sh")
+    emr_loader.upload_to_s3("scripts/pyspark_quick_setup.sh", bucket_name=config_emr.get("script_bucket_name"),
+                            key_name="pyspark_quick_setup.sh")
+
+    logger.info(
+        "*******************************************+**********************************************************")
+    logger.info("Create cluster and run boostrap.")
     emr_response = emr_loader.load_cluster()
-    emr_client = emr_loader.emr_client()
+    emr_client = emr_loader.boto_client("emr")
 
     while True:
-        response = emr_client.describe_cluster(
+        job_response = emr_client.describe_cluster(
             ClusterId=emr_response.get("JobFlowId")
         )
         time.sleep(10)
-        if response.get("Cluster").get("MasterPublicDnsName") is not None:
-            master_dns = response.get("Cluster").get("MasterPublicDnsName")
+        if job_response.get("Cluster").get("MasterPublicDnsName") is not None:
+            master_dns = job_response.get("Cluster").get("MasterPublicDnsName")
 
-        if response.get("Cluster").get("Status").get("State") == "WAITING":
+        if job_response.get("Cluster").get("Status").get("State") == "WAITING":
             break
         else:
-            logger.info(response)
+            logger.info(job_response)
 
-    emr_loader.add_step(emr_response.get("JobFlowId"), master_dns)
+    logger.info(
+        "*******************************************+**********************************************************")
+    logger.info("Run steps.")
+    add_step_response = emr_loader.add_step(emr_response.get("JobFlowId"), master_dns)
+
+    while True:
+        list_steps_response = emr_client.list_steps(ClusterId=emr_response.get("JobFlowId"), StepStates=["COMPLETED"])
+        time.sleep(10)
+        if len(list_steps_response.get("Steps")) == len(
+                add_step_response.get("StepIds")):  # make sure that all steps are completed
+            break
+        else:
+            logger.info(emr_client.list_steps(ClusterId=emr_response.get("JobFlowId")))
+
+
+if __name__ == "__main__":
+    main()

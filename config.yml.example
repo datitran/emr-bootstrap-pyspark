@@ -4,7 +4,10 @@ emr:
   region_name: <Region Name>
   cluster_name: <Cluster Name>
   instance_count: <Number of Instances>
+  master_instance_type: <Instance Type for Master>
+  slave_instance_type: <Instance Type for Slave>
   key_name: <Ec2 Keyname>
+  subnet_id: <Subnet ID e.g. for M4 Instances>
   log_uri: s3://<Your S3 Location to the Logs>
   software_version: <emr-5.x.x>
   script_bucket_name: <Name of Bucket to be created on S3>

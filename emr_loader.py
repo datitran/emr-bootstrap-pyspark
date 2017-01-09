@@ -14,14 +14,18 @@ logger.addHandler(ch)
 
 
 class EMRLoader(object):
-    def __init__(self, aws_access_key, aws_secret_access_key, region_name, cluster_name, instance_count, key_name,
-                 log_uri, software_version, script_bucket_name):
-        self.instance_count = instance_count
-        self.key_name = key_name
-        self.cluster_name = cluster_name
+    def __init__(self, aws_access_key, aws_secret_access_key, region_name,
+                 cluster_name, instance_count, master_instance_type, slave_instance_type,
+                 key_name, subnet_id, log_uri, software_version, script_bucket_name):
         self.aws_access_key = aws_access_key
         self.aws_secret_access_key = aws_secret_access_key
         self.region_name = region_name
+        self.cluster_name = cluster_name
+        self.instance_count = instance_count
+        self.master_instance_type = master_instance_type
+        self.slave_instance_type = slave_instance_type
+        self.key_name = key_name
+        self.subnet_id = subnet_id
         self.log_uri = log_uri
         self.software_version = software_version
         self.script_bucket_name = script_bucket_name
@@ -39,12 +43,13 @@ class EMRLoader(object):
             LogUri=self.log_uri,
             ReleaseLabel=self.software_version,
             Instances={
-                'MasterInstanceType': 'm3.xlarge',
-                'SlaveInstanceType': 'm3.xlarge',
+                'MasterInstanceType': self.master_instance_type,
+                'SlaveInstanceType': self.slave_instance_type,
                 'InstanceCount': self.instance_count,
                 'KeepJobFlowAliveWhenNoSteps': True,
                 'TerminationProtected': False,
-                'Ec2KeyName': self.key_name
+                'Ec2KeyName': self.key_name,
+                'Ec2SubnetId': self.subnet_id
             },
             Applications=[
                 {
@@ -125,7 +130,10 @@ def main():
         region_name=config_emr.get("region_name"),
         cluster_name=config_emr.get("cluster_name"),
         instance_count=config_emr.get("instance_count"),
+        master_instance_type=config_emr.get("master_instance_type"),
+        slave_instance_type=config_emr.get("slave_instance_type"),
         key_name=config_emr.get("key_name"),
+        subnet_id=config_emr.get("subnet_id"),
         log_uri=config_emr.get("log_uri"),
         software_version=config_emr.get("software_version"),
         script_bucket_name=config_emr.get("script_bucket_name")
@@ -154,24 +162,37 @@ def main():
         if job_response.get("Cluster").get("MasterPublicDnsName") is not None:
             master_dns = job_response.get("Cluster").get("MasterPublicDnsName")
 
-        if job_response.get("Cluster").get("Status").get("State") == "WAITING":
+        step = True
+
+        job_state = job_response.get("Cluster").get("Status").get("State")
+        job_state_reason = job_response.get("Cluster").get("Status").get("StateChangeReason").get("Message")
+
+        if job_state in ["WAITING", "TERMINATED", "TERMINATED_WITH_ERRORS"]:
+            step = False
+            logger.info(
+                "Script stops with state: {job_state} "
+                "and reason: {job_state_reason}".format(job_state=job_state, job_state_reason=job_state_reason))
             break
         else:
             logger.info(job_response)
 
-    logger.info(
-        "*******************************************+**********************************************************")
-    logger.info("Run steps.")
-    add_step_response = emr_loader.add_step(emr_response.get("JobFlowId"), master_dns)
+    if step:
+        logger.info(
+            "*******************************************+**********************************************************")
+        logger.info("Run steps.")
+        add_step_response = emr_loader.add_step(emr_response.get("JobFlowId"), master_dns)
 
-    while True:
-        list_steps_response = emr_client.list_steps(ClusterId=emr_response.get("JobFlowId"), StepStates=["COMPLETED"])
-        time.sleep(10)
-        if len(list_steps_response.get("Steps")) == len(
-                add_step_response.get("StepIds")):  # make sure that all steps are completed
-            break
-        else:
-            logger.info(emr_client.list_steps(ClusterId=emr_response.get("JobFlowId")))
+        while True:
+            list_steps_response = emr_client.list_steps(ClusterId=emr_response.get("JobFlowId"),
+                                                        StepStates=["COMPLETED"])
+            time.sleep(10)
+            if len(list_steps_response.get("Steps")) == len(
+                    add_step_response.get("StepIds")):  # make sure that all steps are completed
+                break
+            else:
+                logger.info(emr_client.list_steps(ClusterId=emr_response.get("JobFlowId")))
+    else:
+        logger.info("Cannot run steps.")
 
 
 if __name__ == "__main__":
